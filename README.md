@@ -1,30 +1,35 @@
-# Intenta Funnels — Translation Memory
+# Intenta Funnels — Glossary
 
 Approved translations used by the **Intenta Funnels Localization** Figma plugin.
 
-## How the plugin uses this repo
+| File | Language |
+| --- | --- |
+| `tm-es.json` | Latin American Spanish |
+| `tm-ptbr.json` | Brazilian Portuguese |
 
-For each language, the plugin loads `tm-<locale>.json` from this repo
-(via `raw.githubusercontent.com`), caches it locally for 1 hour, and looks up
-every text layer there before asking Claude. Strings found here are inserted
-as-is (shown with ⚡ in the plugin).
-
-## File format
-
-One file per locale, named `tm-<locale>.json` (e.g. `tm-es.json`, `tm-de.json`),
-containing a flat object of English source → approved translation:
+Each file maps English to the approved translation:
 
 ```json
 {
-  "Find out your connection language": "Descubre tu lenguaje de conexión",
+  "Continue": "Continuar",
   "Get my results": "Ver mis resultados"
 }
 ```
 
-Lookups ignore case, surrounding whitespace and trailing punctuation.
+## How the plugin uses it
+
+- A Figma text layer that exactly matches an entry gets that translation directly (shown with ⚡)
+- Entries that appear inside longer texts are sent to Claude as required wording
+- Lookups ignore case, surrounding spaces and trailing punctuation
 
 ## Updating
 
-1. Edit or regenerate a `tm-<locale>.json` file (see `build_tm.py` for building from Apple Numbers TM exports)
-2. Commit on `main`
-3. Users get the change after their local cache expires (≤ 1 hour) or after reloading the plugin
+- **One term:** edit the JSON file here (pencil icon) and commit to `main`
+- **Whole glossary:** fill `glossary-template.csv` (or any CSV/Excel/Numbers file with English + Spanish/Portuguese columns), then:
+  ```bash
+  python3 build_tm.py glossary-template.csv es
+  python3 build_tm.py glossary-template.csv ptbr
+  ```
+  and upload the resulting `tm-es.json` / `tm-ptbr.json`
+
+Changes reach plugin users within an hour, or immediately after reloading the plugin.

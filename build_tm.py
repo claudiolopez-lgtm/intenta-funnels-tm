@@ -1,127 +1,141 @@
 #!/usr/bin/env python3
 """
-Build TM JSON files from Apple Numbers translation memory files.
+Build tm-<locale>.json glossary files for the Intenta Funnels Localization plugin.
 
 Usage:
-    python build_tm.py path/to/Web-Growth_ES_TM.numbers es
-    python build_tm.py path/to/Web-Growth_PTBR_TM.numbers ptbr
-    python build_tm.py path/to/Web-Growth_IT_TM.numbers it
+    python3 build_tm.py <glossary file> <locale> [output folder]
 
-    Valid locales: es, ptbr, it, de, pl, ja, fr, ro, cs, hu
+    <glossary file>  .csv, .xlsx or .numbers
+    <locale>         es | ptbr
+    [output folder]  where tm-<locale>.json is written (default: next to this script)
 
-Note: the .xliff → tm-<locale>.json path (Crowdin exports) is handled separately;
-this script is for the Apple Numbers TM exports.
+Examples:
+    python3 build_tm.py Intenta_ES_glossary.xlsx es
+    python3 build_tm.py Intenta_PTBR_glossary.csv ptbr ~/intenta-funnels-tm
 
-Output: tm-<locale>.json in the repo root, ready to commit.
+Expected format: first row is a header, one row per term, with
+    • an English column  — header contains "english", "source" or "en"
+    • a target column    — header contains "spanish"/"español"/"es" or
+                           "portuguese"/"português"/"pt"/"target"
+If the headers aren't recognized, the first two columns are used (EN, target).
 
-Requirements:
-    pip install numbers-parser
+What it does:
+    1. Reads every EN → target pair, trimming whitespace and skipping empty rows
+    2. If the same EN has several translations, keeps the most frequent one
+       (and lists the conflicts so you can fix them at the source)
+    3. Writes a flat JSON object {"English": "Translation", ...}, one entry per
+       line in original order, ready to upload to the intenta-funnels-tm repo
 
-Expected .numbers format:
-    Sheet contains a table with columns:
-        File | Key | English (Source) | <Target Language>
-    Header row is row 0; data starts at row 1.
-
-What the script does:
-    1. Reads every EN→Target pair
-    2. If the same EN has multiple Target translations, picks the most frequent one
-    3. Strips whitespace, skips empty/null rows
-    4. Writes a flat JSON object: {"English string": "Target string", ...}
-       keys in original-encounter order for clean diffs.
+Requirements: .xlsx needs `pip3 install openpyxl`; .numbers needs `pip3 install numbers-parser`.
 """
 
+import csv
 import json
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+VALID_LOCALES = {"es", "ptbr"}
 
-VALID_LOCALES = {"es", "ptbr", "it", "de", "pl", "ja", "fr", "ro", "cs", "hu"}
+EN_HINTS = ["english", "source", "en"]
+TARGET_HINTS = {
+    "es": ["spanish", "español", "espanol", "es", "target", "translation"],
+    "ptbr": ["portuguese", "português", "portugues", "pt-br", "ptbr", "pt", "target", "translation"],
+}
+
+
+def read_rows(path):
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        text = path.read_bytes().decode("utf-8-sig", errors="replace")
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
+        except csv.Error:
+            dialect = csv.excel
+        return [row for row in csv.reader(text.splitlines(), dialect)]
+    if suffix in (".xlsx", ".xlsm"):
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            sys.exit("ERROR: openpyxl not installed. Run: pip3 install openpyxl")
+        ws = load_workbook(path, read_only=True, data_only=True).worksheets[0]
+        return [list(r) for r in ws.iter_rows(values_only=True)]
+    if suffix == ".numbers":
+        try:
+            from numbers_parser import Document
+        except ImportError:
+            sys.exit("ERROR: numbers-parser not installed. Run: pip3 install numbers-parser")
+        table = Document(str(path)).sheets[0].tables[0]
+        return [list(r) for r in table.rows(values_only=True)]
+    sys.exit(f"ERROR: unsupported file type {suffix!r} (use .csv, .xlsx or .numbers)")
+
+
+def find_column(header, hints, exclude=None):
+    # Exact header match first, then substring match (hints longer than 2 chars only)
+    for exact in (True, False):
+        for i, h in enumerate(header):
+            if i == exclude:
+                continue
+            for hint in hints:
+                if (h == hint) if exact else (len(hint) > 2 and hint in h):
+                    return i
+    return None
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         print(__doc__)
         sys.exit(1)
 
-    numbers_path = Path(sys.argv[1])
-    locale = sys.argv[2].lower()
+    src = Path(sys.argv[1]).expanduser()
+    locale = sys.argv[2].lower().replace("-", "")
+    out_dir = Path(sys.argv[3]).expanduser() if len(sys.argv) == 4 else Path(__file__).resolve().parent
 
-    if not numbers_path.exists():
-        print(f"ERROR: file not found — {numbers_path}")
-        sys.exit(1)
+    if not src.exists():
+        sys.exit(f"ERROR: file not found — {src}")
     if locale not in VALID_LOCALES:
-        print(f"ERROR: unknown locale {locale!r} (expected one of {sorted(VALID_LOCALES)})")
-        sys.exit(1)
+        sys.exit(f"ERROR: unknown locale {locale!r} (expected one of {sorted(VALID_LOCALES)})")
 
-    try:
-        from numbers_parser import Document
-    except ImportError:
-        print("ERROR: numbers-parser not installed. Run: pip install numbers-parser")
-        sys.exit(1)
-
-    print(f"Reading {numbers_path}…")
-    doc = Document(str(numbers_path))
-    sheets = doc.sheets
-    if not sheets:
-        print("ERROR: no sheets found in file")
-        sys.exit(1)
-
-    table = sheets[0].tables[0]
-    rows = list(table.rows(values_only=True))
+    rows = read_rows(src)
     if len(rows) < 2:
-        print("ERROR: file has no data rows")
-        sys.exit(1)
+        sys.exit("ERROR: file has no data rows")
 
-    # Detect columns: looking for "English (Source)" and a target-language column.
-    # Default to indexes 2 and 3 (matches the original Web-Growth format).
-    header = [str(c).strip() if c else "" for c in rows[0]]
-    print(f"Header: {header}")
+    header = [str(c).strip().lower() if c is not None else "" for c in rows[0]]
+    en_col = find_column(header, EN_HINTS)
+    if en_col is None:
+        en_col = 0
+    tgt_col = find_column(header, TARGET_HINTS[locale], exclude=en_col)
+    if tgt_col is None:
+        tgt_col = 1 if en_col == 0 else 0
+    print(f"Header: {rows[0]}")
+    print(f"Using EN column {en_col} ({rows[0][en_col]!r}), target column {tgt_col} ({rows[0][tgt_col]!r})")
 
-    en_col, tgt_col = 2, 3
-    for i, h in enumerate(header):
-        lower = h.lower()
-        if "english" in lower or "source" in lower:
-            en_col = i
-        if any(t in lower for t in ["target", "spanish", "portuguese", "italian", "german", "polish", "japanese", "french", "romanian", "czech", "hungarian"]):
-            tgt_col = i
-
-    print(f"Using EN column {en_col} ({header[en_col]!r}), Target column {tgt_col} ({header[tgt_col]!r})")
-
-    # Build EN → most-common-target mapping, preserving original encounter order
     en_to_targets = defaultdict(Counter)
-    encounter_order = []  # ordered list of unique EN strings as we first see them
-
-    skipped_empty = 0
-    skipped_dup = 0
+    order = []
+    skipped = 0
     for r in rows[1:]:
         if len(r) <= max(en_col, tgt_col):
-            skipped_empty += 1
+            skipped += 1
             continue
         en, tgt = r[en_col], r[tgt_col]
-        if not isinstance(en, str) or not isinstance(tgt, str):
-            skipped_empty += 1
-            continue
-        en, tgt = en.strip(), tgt.strip()
+        en = str(en).strip() if en is not None else ""
+        tgt = str(tgt).strip() if tgt is not None else ""
         if not en or not tgt:
-            skipped_empty += 1
+            skipped += 1
             continue
         if en not in en_to_targets:
-            encounter_order.append(en)
+            order.append(en)
         en_to_targets[en][tgt] += 1
 
-    # Pick most-common target for each EN (ties broken by encounter order in Counter)
-    tm = {}
-    inconsistent = []
-    for en in encounter_order:
+    tm, conflicts = {}, []
+    for en in order:
         targets = en_to_targets[en]
         if len(targets) > 1:
-            inconsistent.append((en, dict(targets)))
-        most_common, _count = targets.most_common(1)[0]
-        tm[en] = most_common
+            conflicts.append((en, dict(targets)))
+        tm[en] = targets.most_common(1)[0][0]
 
-    out_path = Path(__file__).resolve().parent.parent / f"tm-{locale}.json"
-    # Write with stable formatting: one entry per line, no trailing comma, ensure_ascii=False
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"tm-{locale}.json"
     with out_path.open("w", encoding="utf-8") as f:
         f.write("{\n")
         items = list(tm.items())
@@ -131,16 +145,12 @@ def main():
         f.write("}\n")
 
     print(f"\n✓ Wrote {len(tm)} entries to {out_path}")
-    print(f"  Skipped empty/malformed rows: {skipped_empty}")
-    print(f"  EN strings with multiple translations (kept most common): {len(inconsistent)}")
-
-    if inconsistent:
-        print(f"\nInconsistent translations (first 10):")
-        for en, targets in inconsistent[:10]:
-            print(f"  {en!r}")
-            for tgt, count in sorted(targets.items(), key=lambda x: -x[1]):
-                marker = " ← kept" if tgt == tm[en] else ""
-                print(f"      [{count}×] {tgt!r}{marker}")
+    print(f"  Skipped empty/malformed rows: {skipped}")
+    print(f"  English terms with several translations (kept most common): {len(conflicts)}")
+    for en, targets in conflicts[:10]:
+        print(f"  {en!r}")
+        for tgt, count in sorted(targets.items(), key=lambda x: -x[1]):
+            print(f"      [{count}×] {tgt!r}{' ← kept' if tgt == tm[en] else ''}")
 
 
 if __name__ == "__main__":
