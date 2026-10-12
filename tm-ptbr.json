@@ -16,7 +16,7 @@
 "PDF": {"t": "PDF", "note": "Do not translate. File extension."},
 "DOCX": {"t": "DOCX", "note": "Do not translate. File extension."},
 "MP4": {"t": "MP4", "note": "Do not translate. File extension."},
-"GDPR": {"t": "RGPD",
+"GDPR": "RGPD",
 "GDPR compliant": "Em conformidade com a RGPD",
 "Intenta for Mac": {"t": "Intenta para Mac", "note": "Translate 'for'; keep 'Intenta' and 'Mac'."},
 "Trusted by 200K+ leaders": {"t": "+200 mil líderes confiam em nós", "note": "Number formatting per locale (200K+ → 200 mil)."},
