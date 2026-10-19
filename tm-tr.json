@@ -1,0 +1,17 @@
+{
+"Intenta": {"t": "Intenta", "note": "Brand name. Never translate. Suffixes with apostrophe: Intenta'da, Intenta'yı, Intenta ile"},
+"Apple Pay": "Apple Pay",
+"Google Pay": "Google Pay",
+"PayPal": "PayPal",
+"Continue": {"t": "Devam et", "note": "button leading to the next step"},
+"Personal account": "Kişisel hesap",
+"Subscription": "Abonelik",
+"Active": {"t": "Aktif", "note": "as a subscription status"},
+"Canceled": {"t": "İptal edildi", "note": "as a subscription status"},
+"Subscribe": "Abone ol",
+"Unsubscribe": "Abonelikten çık",
+"Renew subscription": "Aboneliği yenile",
+"Sign in": "Giriş yap",
+"Log out": "Çıkış yap",
+"Save": {"t": "Tasarruf et", "note": "as in the phrase \"save money\""}
+}
